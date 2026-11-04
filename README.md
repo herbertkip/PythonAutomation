@@ -42,7 +42,7 @@ Install common dependencies:
 pip install pillow pypdf python-docx watchdog requests beautifulsoup4
 
 
-# PythonAutomation Project Manifest
+## PythonAutomation Project Manifest
 
 ## 1. Overview
 
