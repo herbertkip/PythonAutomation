@@ -1,0 +1,201 @@
+import os
+import shutil
+from pathlib import Path
+from collections import defaultdict
+
+def get_drawing_number(filename):
+    """
+    Extract the drawing sheet number from the filename.
+    Takes everything before the first space.
+    """
+    # Remove .pdf extension if present
+    name = filename
+    if name.lower().endswith('.pdf'):
+        name = name[:-4]
+    
+    # Split on first space and take the first part
+    if ' ' in name:
+        return name.split(' ')[0]
+    else:
+        # If no space, return the whole name (without extension)
+        return name
+
+def find_pdf_files(root_directory, exclude_drawings_folder=True):
+    """
+    Recursively find all PDF files in the given directory and its subfolders.
+    Optionally excludes the DRAWINGS folder.
+    """
+    pdf_files = []
+    root_path = Path(root_directory)
+    drawings_path = root_path / "DRAWINGS"
+    
+    # Walk through all directories
+    for file_path in root_path.rglob('*.pdf'):
+        # Skip files in the DRAWINGS folder if requested
+        if exclude_drawings_folder and drawings_path in file_path.parents:
+            continue
+        pdf_files.append(file_path)
+    
+    for file_path in root_path.rglob('*.PDF'):
+        # Skip files in the DRAWINGS folder if requested
+        if exclude_drawings_folder and drawings_path in file_path.parents:
+            continue
+        pdf_files.append(file_path)
+    
+    return pdf_files
+
+def handle_duplicate(destination_dir, sheet_number, source_path, conflict_strategy='rename'):
+    """
+    Handle duplicate sheet numbers by either renaming, skipping, or overwriting.
+    """
+    destination_path = destination_dir / f"{sheet_number}.pdf"
+    
+    if not destination_path.exists():
+        # No conflict, copy the file
+        shutil.copy2(source_path, destination_path)
+        return f"Copied: {sheet_number}.pdf"
+    else:
+        # The file already exists in the destination folder
+        if conflict_strategy == 'skip':
+            return f"Skipped: {sheet_number}.pdf (already exists in DRAWINGS)"
+        elif conflict_strategy == 'rename':
+            # Append a suffix to the filename
+            counter = 1
+            while True:
+                new_name = f"{sheet_number}_{counter}.pdf"
+                new_path = destination_dir / new_name
+                if not new_path.exists():
+                    shutil.copy2(source_path, new_path)
+                    return f"Copied: {new_name} (duplicate of {sheet_number})"
+                counter += 1
+        elif conflict_strategy == 'overwrite':
+            shutil.copy2(source_path, destination_path)
+            return f"Overwrote: {sheet_number}.pdf"
+
+def main():
+    # Get the root directory from user
+    print("=" * 60)
+    print("PROCORE DRAWINGS EXTRACTOR")
+    print("=" * 60)
+    print("\nThis script will:")
+    print("  • Search all folders for PDF files")
+    print("  • Rename files to their drawing sheet number")
+    print("  • Copy all drawings to a 'DRAWINGS' folder")
+    print("  • Create the DRAWINGS folder in the directory you specify")
+    print("-" * 60)
+    
+    root_dir = input("\nEnter the root directory path: ").strip()
+    
+    if not root_dir:
+        print("No directory entered. Exiting...")
+        return
+    
+    root_path = Path(root_dir)
+    
+    if not root_path.exists():
+        print(f"Error: Directory '{root_dir}' does not exist.")
+        return
+    
+    if not root_path.is_dir():
+        print(f"Error: '{root_dir}' is not a directory.")
+        return
+    
+    # Create the DRAWINGS folder INSIDE the root directory
+    drawings_dir = root_path / "DRAWINGS"
+    drawings_dir.mkdir(exist_ok=True)
+    
+    print(f"\n✓ DRAWINGS folder created at: {drawings_dir}")
+    print(f"  (This is inside the directory you specified: {root_path})")
+    
+    # Find all PDF files (excluding those already in DRAWINGS folder)
+    print("\nScanning for PDF files in all subfolders...")
+    pdf_files = find_pdf_files(root_path, exclude_drawings_folder=True)
+    
+    if not pdf_files:
+        print("No PDF files found outside the DRAWINGS folder.")
+        print("(All PDFs may have already been extracted.)")
+        return
+    
+    print(f"✓ Found {len(pdf_files)} PDF files outside the DRAWINGS folder.")
+    
+    # Ask for conflict handling strategy
+    print("\nChoose conflict handling strategy for duplicate sheet numbers:")
+    print("  1. Rename duplicates (append _1, _2, etc.)")
+    print("  2. Skip duplicates")
+    print("  3. Overwrite duplicates")
+    
+    choice = input("Enter your choice (1-3) [default: 1]: ").strip()
+    
+    conflict_map = {
+        '1': 'rename',
+        '2': 'skip',
+        '3': 'overwrite'
+    }
+    
+    conflict_strategy = conflict_map.get(choice, 'rename')
+    
+    # Process each PDF file
+    print("\nProcessing files...")
+    print("-" * 60)
+    
+    processed_count = 0
+    skipped_count = 0
+    error_count = 0
+    
+    for pdf_path in pdf_files:
+        try:
+            # Get the filename without the full path
+            original_filename = pdf_path.name
+            
+            # Extract the drawing number
+            sheet_number = get_drawing_number(original_filename)
+            
+            # Handle duplicate and copy
+            result = handle_duplicate(drawings_dir, sheet_number, pdf_path, conflict_strategy)
+            print(f"  {result}")
+            
+            if "Skipped" in result:
+                skipped_count += 1
+            elif "Error" not in result:
+                processed_count += 1
+                
+        except Exception as e:
+            error_count += 1
+            print(f"  Error processing {pdf_path.name}: {e}")
+    
+    # Summary
+    print("-" * 60)
+    print("\n" + "=" * 60)
+    print("EXTRACTION COMPLETE!")
+    print("=" * 60)
+    print(f"  Total PDF files found:    {len(pdf_files)}")
+    print(f"  Files processed:          {processed_count}")
+    print(f"  Files skipped:            {skipped_count}")
+    if error_count > 0:
+        print(f"  Errors encountered:       {error_count}")
+    print(f"\n  📁 DRAWINGS folder location: {drawings_dir}")
+    print(f"  (Created in: {root_path})")
+    
+    # Optional: Show list of extracted files
+    show_list = input("\nWould you like to see the list of extracted files? (y/n): ").strip().lower()
+    if show_list == 'y':
+        print("\nExtracted files in DRAWINGS folder:")
+        extracted_files = sorted(drawings_dir.glob('*.pdf'))
+        if extracted_files:
+            for file in extracted_files:
+                print(f"  • {file.name}")
+        else:
+            print("  No files were extracted.")
+    
+    print("\n" + "=" * 60)
+
+if __name__ == "__main__":
+    try:
+        main()
+        input("\nPress Enter to exit...")
+    except KeyboardInterrupt:
+        print("\n\nOperation cancelled by user.")
+    except Exception as e:
+        print(f"\nAn error occurred: {e}")
+        print("Please check your directory path and try again.")
+        input("\nPress Enter to exit...")
